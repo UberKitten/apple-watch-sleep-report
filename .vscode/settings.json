@@ -1,0 +1,39 @@
+{
+  // Python environment
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
+  // Type checking - basedpyright via Pylance
+  "python.analysis.typeCheckingMode": "strict",
+  "python.analysis.diagnosticMode": "workspace",
+
+  // Ruff as formatter + linter (replaces black, isort, flake8, etc.)
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+
+  // Disable competing formatters/linters
+  "python.formatting.provider": "none",
+
+  // File associations
+  "files.associations": {
+    "pyproject.toml": "toml"
+  },
+
+  // Search exclusions
+  "search.exclude": {
+    "**/.venv": true,
+    "**/__pycache__": true,
+    "**/.ruff_cache": true,
+    "**/.pytest_cache": true,
+    "**/htmlcov": true,
+    "**/*.egg-info": true
+  },
+
+  // Terminal environment
+  "python.terminal.activateEnvironment": true
+}

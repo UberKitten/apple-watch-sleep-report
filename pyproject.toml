@@ -1,0 +1,403 @@
+# ============================================================
+# ULTRA-STRICT PYTHON PROJECT TEMPLATE
+# Maximum strictness - TypeScript strict mode equivalent
+# Tools: uv + ruff + basedpyright + pydantic v2
+# Python 3.12+
+# ============================================================
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sleep-export"
+version = "0.1.0"
+description = "Self-hosted analyzer for Apple Health sleep exports — actigraphy plots and clinician-ready PDF reports"
+authors = [{ name = "Astra (Uber Kitten)", email = "cod@astra.lol" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+    "defusedxml>=0.7",
+    "typing-extensions>=4.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "basedpyright>=1.31.7",
+    "prek",
+    "ruff",
+    "gitingest",
+    "poethepoet",
+    "radon",
+    "skylos",
+    "ty",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "httpx>=0.27",
+    "pandas-stubs",
+    "types-defusedxml",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["sleep_export*"]
+exclude = ["tests*", "scripts*", "docs*", "examples*"]
+
+# ============================================================
+# POE THE POET - Task Runner
+# ============================================================
+[tool.poe.tasks]
+# Run with: poe format or uv run poe format
+# Formats code, fixes issues, and type checks
+format = [
+    {cmd = "ruff format ."},
+    {cmd = "ruff check . --fix"},
+    {cmd = "basedpyright --level error"},
+    {cmd = "ty check ."}
+]
+
+# Run with: poe check
+# Lint and type check without fixing
+check = [
+    {cmd = "ruff check ."},
+    {cmd = "basedpyright --level error"},
+    {cmd = "ty check ."}
+]
+
+ty = {cmd = "ty check ."}
+
+# Run with: poe lint or uv run poe lint
+# Only linting, no type checking
+lint = {cmd = "ruff check . --fix"}
+
+# Run with: poe lint-unsafe or uv run poe lint-unsafe
+# Lint with unsafe fixes enabled (more aggressive)
+lint-unsafe = {cmd = "ruff check . --fix --unsafe-fixes"}
+
+# Run with: poe metrics or uv run poe metrics
+# Check code quality: dead code, complexity, and maintainability
+metrics = [
+    {cmd = "skylos . --quality"},
+    {cmd = "radon cc . -a -nb"},
+    {cmd = "radon mi . -nb"}
+]
+
+# Run with: poe quality or uv run poe quality
+# Full quality check: format, lint, type check, and metrics
+quality = [
+    {cmd = "ruff format ."},
+    {cmd = "ruff check . --fix"},
+    {cmd = "basedpyright --level error"},
+    {cmd = "ty check ."},
+    {cmd = "radon cc . -a -nb"},
+    {cmd = "skylos . --quality --danger"},
+]
+
+# ============================================================
+# RUFF CONFIGURATION - MAXIMUM STRICTNESS
+# ============================================================
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+indent-width = 4
+fix = true
+show-fixes = true
+preview = true  # Enable preview rules (PLR1702, etc.)
+
+[tool.ruff.lint]
+# Comprehensive rule set for strict checking
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "BLE",    # flake8-blind-except (no bare except:)
+    "C4",     # flake8-comprehensions
+    "C90",    # mccabe complexity
+    "T20",    # flake8-print (no print statements)
+    "SIM",    # flake8-simplify
+    "N",      # pep8-naming
+    "Q",      # flake8-quotes
+    "RUF",    # Ruff-specific rules
+    "ASYNC",  # flake8-async
+    "S",      # flake8-bandit (security)
+    "PTH",    # flake8-use-pathlib
+    "ERA",    # eradicate (commented-out code)
+    "PL",     # pylint (includes PLR1702: too-many-nested-blocks)
+    "PERF",   # perflint (performance)
+    "ANN",    # flake8-annotations
+    "ARG",    # flake8-unused-arguments
+    "FBT",    # flake8-boolean-trap (no boolean positional args)
+    "RET",    # flake8-return
+    "TCH",    # flake8-type-checking
+]
+
+ignore = [
+    "E501",    # Line too long (formatter handles this)
+    "S603",    # subprocess without shell=True (too strict)
+    "S607",    # Starting a process with a partial path (too strict)
+]
+
+# Complexity limits (anti-LLM-slop)
+[tool.ruff.lint.mccabe]
+max-complexity = 10  # Maximum cyclomatic complexity
+
+[tool.ruff.lint.pylint]
+max-nested-blocks = 3  # Maximum nested block depth (PLR1702)
+
+# Per-file ignores
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = [
+    "F401",    # Allow unused imports in __init__.py
+]
+"tests/**/*.py" = [
+    "S101",    # Allow assert in tests
+    "PLR2004", # Allow magic values in tests
+    "ANN",     # Don't require annotations in tests
+    "FBT",     # Allow boolean args in tests
+    "PLC2701", # Allow importing private helpers in tests
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sleep_export"]
+combine-as-imports = true
+force-sort-within-sections = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-type-checking]
+strict = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+# ============================================================
+# Basedpyright CONFIGURATION - MAXIMUM STRICTNESS
+# TypeScript strict mode equivalent
+# ============================================================
+[tool.basedpyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+
+# ============================================================
+# IMPORT AND MODULE CHECKS
+# ============================================================
+reportMissingImports = true
+reportMissingTypeStubs = true  # Stricter: require type stubs
+reportUndefinedVariable = true
+reportAssertAlwaysTrue = true
+reportInvalidStringEscapeSequence = true
+
+# ============================================================
+# STRICT NULL SAFETY (like TS strictNullChecks)
+# ============================================================
+reportOptionalSubscript = true
+reportOptionalMemberAccess = true
+reportOptionalCall = true
+reportOptionalIterable = true
+reportOptionalContextManager = true
+reportOptionalOperand = true
+reportAny = true  # Prohibir Any completamente
+reportExplicitAny = true
+reportIgnoreCommentWithoutRule = false  # No permitir # type: ignore sin código
+reportPrivateLocalImportUsage = true
+
+# ============================================================
+# TYPE COMPLETENESS (like TS noImplicitAny + strictFunctionTypes)
+# ============================================================
+reportMissingParameterType = true
+reportMissingTypeArgument = true
+reportUnknownParameterType = true
+reportUnknownLambdaType = true
+reportUnknownArgumentType = true   # STRICT: Enable (can be noisy)
+reportUnknownVariableType = true   # STRICT: Enable (can be noisy)
+reportUnknownMemberType = true     # STRICT: Enable (can be noisy)
+reportUntypedFunctionDecorator = true
+reportUntypedClassDecorator = true
+reportUntypedBaseClass = true
+reportUntypedNamedTuple = true
+
+# ============================================================
+# CLASS AND INHERITANCE CHECKS
+# ============================================================
+reportIncompatibleMethodOverride = true
+reportIncompatibleVariableOverride = true
+reportInconsistentConstructor = true
+reportUninitializedInstanceVariable = true
+reportOverlappingOverload = true
+reportMissingSuperCall = true  # STRICT: Enable
+
+# ============================================================
+# CODE QUALITY (like TS noUnusedLocals + noUnusedParameters)
+# ============================================================
+reportPrivateUsage = true
+reportConstantRedefinition = true
+reportInvalidStubStatement = true
+reportIncompleteStub = true
+reportUnsupportedDunderAll = true
+reportUnusedClass = "error"        # STRICT: Error instead of warning
+reportUnusedFunction = "error"     # STRICT: Error instead of warning
+reportUnusedVariable = "error"     # STRICT: Error instead of warning
+reportUnusedImport = "error"       # STRICT: Error instead of warning
+reportDuplicateImport = "error"    # STRICT: Error instead of warning
+
+# ============================================================
+# UNNECESSARY CODE DETECTION
+# ============================================================
+reportUnnecessaryIsInstance = "error"         # STRICT: Error
+reportUnnecessaryCast = "error"               # STRICT: Error
+reportUnnecessaryComparison = "error"         # STRICT: Error
+reportUnnecessaryContains = "error"           # STRICT: Error
+reportUnnecessaryTypeIgnoreComment = "error"  # STRICT: Error
+
+# ============================================================
+# FUNCTION/METHOD SIGNATURE STRICTNESS
+# ============================================================
+reportGeneralTypeIssues = true
+reportPropertyTypeMismatch = true
+reportFunctionMemberAccess = true
+reportCallInDefaultInitializer = true
+reportImplicitStringConcatenation = true  # STRICT: Enable
+
+# ============================================================
+# ADDITIONAL STRICT CHECKS (Progressive Enhancement)
+# ============================================================
+reportImplicitOverride = true    # STRICT: Require @override decorator (Python 3.12+)
+reportDeprecated = "warning"     # Warn on deprecated usage
+
+# ============================================================
+# ADDITIONAL TYPE CHECKS
+# ============================================================
+reportImportCycles = "warning"
+
+# ============================================================
+# EXCLUSIONS
+# ============================================================
+exclude = [
+    "**/__pycache__",
+    "**/node_modules",
+    ".git",
+    ".mypy_cache",
+    ".pyright_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".venv",
+    "venv",
+    "env",
+    "logs",
+    "output",
+    "data",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+
+venvPath = "."
+venv = ".venv"
+
+# ============================================================
+# PYTEST CONFIGURATION
+# ============================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-W error",  # STRICT: Treat warnings as errors (catch deprecations early)
+    "--tb=short",
+    "--cov=src/sleep_export",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html",
+    "--cov-report=xml",
+    "--cov-fail-under=80",  # STRICT: Require 80% coverage
+    "-m",
+    "not integration",
+]
+filterwarnings = [
+    "error",  # Treat all warnings as errors by default
+    # Uncomment to selectively ignore specific third-party warnings if needed:
+    # "ignore::DeprecationWarning:some_noisy_library",
+    # "ignore::UserWarning:another_library",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+# ============================================================
+# COVERAGE CONFIGURATION
+# ============================================================
+[tool.coverage.run]
+source = ["src/sleep_export"]
+branch = true  # STRICT: Enable branch coverage
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/.venv/*",
+    "*/venv/*",
+    "*/scripts/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+fail_under = 80  # STRICT: Require 80% coverage
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@overload",
+]
+
+[dependency-groups]
+dev = [
+    "prek>=0.2.25",
+]
+
+# ============================================================
+# PANDERA CONFIGURATION (DataFrame Schema Validation)
+# Uncomment this section if using pandas/polars
+# ============================================================
+# [tool.pandera]
+# # Enable strict validation mode
+# strict = true
+#
+# # Validate on assignment (runtime checks)
+# # from pandera.typing import DataFrame, Series
+# # df: DataFrame[MySchema] = pd.DataFrame(...)
+#
+# # Example usage pattern:
+# # 1. Define schema: class MySchema(pa.DataFrameModel): ...
+# # 2. Validate: MySchema.validate(df, lazy=True)
+# # 3. Use typing: def process(df: DataFrame[MySchema]) -> DataFrame[OutputSchema]
+# #
+# # For testing, use pandera.strategies:
+# # @given(df=MySchema.strategy(size=10))
+# # def test_my_function(df):
+# #     result = my_function(df)
+# #     assert OutputSchema.validate(result)

@@ -1,0 +1,24 @@
+# Run `uv run prek auto-update` periodically to update hook versions
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.8
+    hooks:
+      - id: ruff-format
+        name: ruff-format (commit)
+        stages: [commit]
+      - id: ruff
+        name: ruff check --fix (commit)
+        args: ["--fix"]
+        stages: [commit]
+      - id: ruff
+        name: ruff check (push)
+        stages: [push]
+  - repo: local
+    hooks:
+      - id: basedpyright
+        name: basedpyright strict type-check (push)
+        entry: uv run basedpyright --level error
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [push]

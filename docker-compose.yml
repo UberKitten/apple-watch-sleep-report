@@ -1,0 +1,47 @@
+# sleep-export — self-hosted Apple Health sleep analyzer
+#
+# This container has no in-app auth and speaks plain HTTP on port 8000.
+# Put a reverse proxy (Caddy / nginx / Traefik / Cloudflare Tunnel /
+# Pomerium / Authelia / etc.) in front of it for TLS + auth, or only
+# reach it from localhost via SSH tunnel.
+
+services:
+  sleep-export:
+    build: .
+    image: sleep-export:latest
+    container_name: sleep-export
+    restart: unless-stopped
+
+    # Choose ONE port-binding pattern depending on your setup:
+
+    # (A) Default: bind to localhost only. Safe to leave as-is on a
+    #     publicly-reachable host; access via SSH tunnel or a reverse
+    #     proxy running on the same machine.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # (B) Reverse proxy in a sibling docker container on a shared
+    #     network: comment the ports: block above and uncomment below.
+    # networks:
+    #   - proxy
+
+    volumes:
+      # Persisted data (sleep.db + last_upload.zip). Survives container
+      # rebuilds; deleting this folder resets the app to the empty state.
+      - ./data:/app/data
+
+    environment:
+      DATA_DIR: /app/data
+      SLEEP_DATE_CUTOFF_HOUR: "15"
+      # NO_CDN: "true"  # uncomment to require local plotly + tailwind under static/
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+# (B) — shared docker network with your reverse proxy
+# networks:
+#   proxy:
+#     external: true

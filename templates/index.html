@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sleep-export</title>
+    {% if no_cdn %}
+      <link rel="stylesheet" href="/static/tailwind.min.css" />
+      <script src="/static/plotly.min.js"></script>
+    {% else %}
+      <script src="https://cdn.tailwindcss.com"></script>
+      <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    {% endif %}
+    <style>
+      .tab-active { @apply border-blue-600 text-blue-700; }
+      .drop-zone-active { @apply border-blue-500 bg-blue-50; }
+    </style>
+  </head>
+  <body class="bg-slate-50 text-slate-900 min-h-screen">
+    <div class="max-w-6xl mx-auto p-4 md:p-8">
+      <header class="mb-6">
+        <h1 class="text-2xl md:text-3xl font-bold">sleep-export</h1>
+        <p class="text-sm text-slate-500">Apple Health → actigraphy + clinician PDF</p>
+      </header>
+
+      {% if parser_warning %}
+        <div class="mb-4 p-3 bg-amber-100 border border-amber-300 rounded text-amber-900">
+          <strong>Heads up:</strong> stored parser_version is
+          <code>{{ parser_version_stored }}</code> but the current code is
+          <code>{{ parser_version_current }}</code>. Re-upload your export to
+          benefit from updated dedupe/aggregation logic.
+        </div>
+      {% endif %}
+
+      <!-- ============= EMPTY STATE ============= -->
+      <section id="empty-state" class="{% if has_data %}hidden{% endif %} bg-white border border-slate-200 rounded-lg p-6 md:p-10">
+        <h2 class="text-xl font-semibold mb-2">Upload your Apple Health export</h2>
+        <p class="text-sm text-slate-600 mb-4">
+          On your iPhone: Health app → Profile (top right) → Export All Health Data
+          → save to Files. The result is a <code>export.zip</code>; drop it below
+          (or pick from Files).
+        </p>
+        <form id="upload-form" class="space-y-3">
+          <div id="drop-zone" class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:bg-slate-100">
+            <p class="text-slate-700">Drop <code>export.zip</code> here, or</p>
+            <label class="inline-block mt-2 px-4 py-2 bg-blue-600 text-white rounded cursor-pointer hover:bg-blue-700">
+              choose a file
+              <input id="file-input" type="file" accept=".zip" class="hidden" />
+            </label>
+            <p id="file-name" class="text-xs text-slate-500 mt-2"></p>
+          </div>
+          <div id="upload-progress" class="hidden">
+            <div class="w-full bg-slate-200 rounded h-2">
+              <div id="progress-bar" class="bg-blue-600 h-2 rounded" style="width:0%"></div>
+            </div>
+            <p id="upload-status" class="text-xs text-slate-500 mt-1">Uploading…</p>
+          </div>
+        </form>
+      </section>
+
+      <!-- ============= LOADED STATE ============= -->
+      <section id="loaded-state" class="{% if not has_data %}hidden{% endif %}">
+        <div class="bg-white border border-slate-200 rounded-lg p-4 mb-4 flex flex-wrap items-center gap-3">
+          <div class="flex-grow">
+            <p id="loaded-summary" class="text-sm text-slate-700">Loading…</p>
+          </div>
+          <button id="btn-replace" class="text-sm px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded">Replace export</button>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-lg p-4 mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="text-sm">
+            <span class="block text-slate-700 mb-1">Date range</span>
+            <span class="flex gap-2">
+              <input id="date-start" type="date" class="border border-slate-300 rounded px-2 py-1 text-sm" />
+              <input id="date-end" type="date" class="border border-slate-300 rounded px-2 py-1 text-sm" />
+            </span>
+          </label>
+          <label class="text-sm">
+            <span class="block text-slate-700 mb-1">Sleep-date cutoff hour
+              <span class="text-slate-500">(records before this local hour count toward previous night)</span>
+            </span>
+            <span class="flex items-center gap-2">
+              <input id="cutoff-hour" type="number" min="0" max="23" value="15" class="border border-slate-300 rounded px-2 py-1 text-sm w-20" />
+              <button id="btn-recompute" class="text-sm px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded">Apply</button>
+            </span>
+          </label>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+          <nav class="flex border-b border-slate-200 overflow-x-auto">
+            <button data-tab="actogram" class="tab-btn px-4 py-2 border-b-2 border-transparent hover:text-blue-700">Actogram</button>
+            <button data-tab="drift" class="tab-btn px-4 py-2 border-b-2 border-transparent hover:text-blue-700">Midpoint Drift</button>
+            <button data-tab="patterns" class="tab-btn px-4 py-2 border-b-2 border-transparent hover:text-blue-700">Daily Patterns</button>
+            <button data-tab="stats" class="tab-btn px-4 py-2 border-b-2 border-transparent hover:text-blue-700">Stats</button>
+          </nav>
+          <div id="tab-content" class="p-2 md:p-4">
+            <div id="chart" class="min-h-[400px]"></div>
+            <div id="stats-content" class="hidden text-sm space-y-2"></div>
+          </div>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-lg p-4 mt-4">
+          <h3 class="text-lg font-semibold mb-3">Generate PDF report</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <label class="block">
+              <span class="block text-slate-700 mb-1">Patient name</span>
+              <input id="pdf-patient" type="text" class="w-full border border-slate-300 rounded px-2 py-1.5" placeholder="(optional)" />
+            </label>
+            <label class="block">
+              <span class="block text-slate-700 mb-1">Clinician notes</span>
+              <textarea id="pdf-notes" rows="2" class="w-full border border-slate-300 rounded px-2 py-1.5" placeholder="(optional context for the doctor)"></textarea>
+            </label>
+          </div>
+          <fieldset class="mt-3 text-sm">
+            <legend class="text-slate-700 mb-1">Sections</legend>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-1">
+              <label><input type="checkbox" data-pdf-section="cover" checked /> Cover</label>
+              <label><input type="checkbox" data-pdf-section="actogram" checked /> Actogram</label>
+              <label><input type="checkbox" data-pdf-section="drift" checked /> Drift</label>
+              <label><input type="checkbox" data-pdf-section="periodogram" checked /> Periodogram</label>
+              <label><input type="checkbox" data-pdf-section="polar" checked /> Polar</label>
+              <label><input type="checkbox" data-pdf-section="weekly" checked /> Weekly heatmap</label>
+              <label><input type="checkbox" data-pdf-section="stats" checked /> Stats</label>
+              <label><input type="checkbox" data-pdf-section="nightly_table" /> Nightly table</label>
+            </div>
+          </fieldset>
+          <button id="btn-pdf" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Generate PDF</button>
+          <span id="pdf-status" class="ml-2 text-sm text-slate-500"></span>
+        </div>
+      </section>
+
+      <footer class="mt-8 text-center text-xs text-slate-400">
+        self-hosted, runs on your homelab. all data stays in this container.
+      </footer>
+    </div>
+
+    <script>
+    (function () {
+      "use strict";
+
+      const $ = (id) => document.getElementById(id);
+      const fileInput = $("file-input");
+      const dropZone = $("drop-zone");
+      const fileName = $("file-name");
+      const uploadProgress = $("upload-progress");
+      const progressBar = $("progress-bar");
+      const uploadStatus = $("upload-status");
+      const emptyState = $("empty-state");
+      const loadedState = $("loaded-state");
+      const summaryEl = $("loaded-summary");
+      const dateStart = $("date-start");
+      const dateEnd = $("date-end");
+      const cutoffHour = $("cutoff-hour");
+      const chartDiv = $("chart");
+      const statsDiv = $("stats-content");
+
+      let currentTab = "actogram";
+      let metaInfo = null;
+
+      // Mirrors src/sleep_export/format_util.py:format_minutes_hm
+      function formatHm(minutes) {
+        const sign = minutes < 0 ? "-" : "";
+        const abs = Math.abs(minutes);
+        if (abs < 60) return `${sign}${Math.round(abs)} min`;
+        let hours = Math.floor(abs / 60);
+        let mins = Math.round(abs - hours * 60);
+        if (mins === 60) { hours += 1; mins = 0; }
+        return `${sign}${hours}h ${mins.toString().padStart(2, "0")}m`;
+      }
+
+      // ---------------- localStorage persistence ----------------
+      // Bumped when the persisted shape changes; older blobs are silently dropped.
+      const STORAGE_KEY = "sleep-export-ui-v1";
+
+      function loadStored() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); }
+        catch { return {}; }
+      }
+      function saveStored(patch) {
+        const cur = loadStored();
+        const next = { ...cur, ...patch };
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      }
+
+      // Wire a single input element to a storage key. Restores on load, saves
+      // on input/change. Safe for text, date, number, and checkbox inputs.
+      function persist(el, key, opts = {}) {
+        const stored = loadStored();
+        if (key in stored && stored[key] !== null && stored[key] !== undefined) {
+          if (el.type === "checkbox") el.checked = !!stored[key];
+          else el.value = stored[key];
+        }
+        const events = opts.events || ["input", "change"];
+        const read = () => (el.type === "checkbox" ? el.checked : el.value);
+        events.forEach((ev) => el.addEventListener(ev, () => saveStored({ [key]: read() })));
+      }
+
+      // Hook up persistent inputs. Done before loadOverview so stored values
+      // win over the meta-derived defaults.
+      persist(dateStart, "dateStart");
+      persist(dateEnd, "dateEnd");
+      persist(cutoffHour, "cutoffHour");
+      persist($("pdf-patient"), "pdfPatient");
+      persist($("pdf-notes"), "pdfNotes");
+      document.querySelectorAll("[data-pdf-section]").forEach((cb) => {
+        persist(cb, `pdfSection_${cb.dataset.pdfSection}`);
+      });
+
+      // Active tab is persisted but only restored if it's a known one.
+      const storedTab = loadStored().tab;
+      if (storedTab && ["actogram", "drift", "patterns", "stats"].includes(storedTab)) {
+        currentTab = storedTab;
+      }
+
+      // ---------------- file upload ----------------
+      ["dragover", "dragenter"].forEach((ev) => {
+        dropZone.addEventListener(ev, (e) => { e.preventDefault(); dropZone.classList.add("drop-zone-active"); });
+      });
+      ["dragleave", "drop"].forEach((ev) => {
+        dropZone.addEventListener(ev, (e) => { e.preventDefault(); dropZone.classList.remove("drop-zone-active"); });
+      });
+      dropZone.addEventListener("drop", (e) => {
+        const f = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) handleUpload(f);
+      });
+      fileInput.addEventListener("change", (e) => {
+        const f = e.target.files[0];
+        if (f) handleUpload(f);
+      });
+
+      async function handleUpload(f) {
+        if (!f.name.endsWith(".zip")) { alert("Please upload a .zip"); return; }
+        fileName.textContent = `${f.name} (${Math.round(f.size / 1024)} KB)`;
+        uploadProgress.classList.remove("hidden");
+        progressBar.style.width = "0%";
+        uploadStatus.textContent = "Uploading…";
+        const fd = new FormData();
+        fd.append("file", f);
+        try {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/ingest");
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              progressBar.style.width = ((e.loaded / e.total) * 100).toFixed(0) + "%";
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              uploadStatus.textContent = "Parsing…";
+              progressBar.style.width = "100%";
+              setTimeout(loadOverview, 300);
+            } else {
+              const detail = (() => { try { return JSON.parse(xhr.responseText).detail || xhr.responseText; } catch { return xhr.responseText; } })();
+              uploadStatus.textContent = `Error: ${detail}`;
+              progressBar.style.width = "0%";
+            }
+          };
+          xhr.send(fd);
+        } catch (err) {
+          uploadStatus.textContent = "Error: " + err.message;
+        }
+      }
+
+      // ---------------- meta + tabs ----------------
+      async function loadOverview() {
+        const meta = await fetch("/api/meta").then((r) => r.json());
+        if (!meta) {
+          emptyState.classList.remove("hidden");
+          loadedState.classList.add("hidden");
+          return;
+        }
+        metaInfo = meta;
+        emptyState.classList.add("hidden");
+        loadedState.classList.remove("hidden");
+        summaryEl.innerHTML = `Loaded: <strong>${meta.original_filename}</strong> · ${meta.date_min} → ${meta.date_max} · ${meta.record_count.toLocaleString()} records`;
+        if (!dateStart.value) dateStart.value = meta.date_min;
+        if (!dateEnd.value) dateEnd.value = meta.date_max;
+        renderTab(currentTab);
+      }
+
+      function setActiveTab(tab) {
+        document.querySelectorAll(".tab-btn").forEach((btn) => {
+          btn.classList.toggle("border-blue-600", btn.dataset.tab === tab);
+          btn.classList.toggle("text-blue-700", btn.dataset.tab === tab);
+        });
+      }
+
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          currentTab = btn.dataset.tab;
+          saveStored({ tab: currentTab });
+          setActiveTab(currentTab);
+          renderTab(currentTab);
+        });
+      });
+
+      function rangeQuery() {
+        const params = new URLSearchParams();
+        if (dateStart.value) params.set("start", dateStart.value);
+        if (dateEnd.value) params.set("end", dateEnd.value);
+        return params.toString();
+      }
+
+      async function renderTab(tab) {
+        chartDiv.classList.remove("hidden");
+        statsDiv.classList.add("hidden");
+        chartDiv.innerHTML = '<p class="text-slate-500 text-sm">Rendering…</p>';
+        const q = rangeQuery();
+        if (tab === "actogram") {
+          const fig = await fetch(`/api/chart/actogram?${q}`).then((r) => r.json());
+          chartDiv.innerHTML = "";
+          Plotly.newPlot(chartDiv, fig.data, fig.layout, { responsive: true, displaylogo: false });
+        } else if (tab === "drift") {
+          const drift = await fetch(`/api/chart/drift?${q}`).then((r) => r.json());
+          const period = await fetch(`/api/chart/periodogram?${q}`).then((r) => r.json());
+          chartDiv.innerHTML = '<div id="drift-plot"></div><div id="periodogram-plot" class="mt-6"></div>';
+          Plotly.newPlot($("drift-plot"), drift.data, drift.layout, { responsive: true });
+          Plotly.newPlot($("periodogram-plot"), period.data, period.layout, { responsive: true });
+        } else if (tab === "patterns") {
+          const polar = await fetch(`/api/chart/polar?${q}`).then((r) => r.json());
+          const weekly = await fetch(`/api/chart/weekly?${q}`).then((r) => r.json());
+          chartDiv.innerHTML = '<div id="polar"></div><div id="weekly" class="mt-6"></div>';
+          Plotly.newPlot($("polar"), polar.data, polar.layout, { responsive: true });
+          Plotly.newPlot($("weekly"), weekly.data, weekly.layout, { responsive: true });
+        } else if (tab === "stats") {
+          chartDiv.classList.add("hidden");
+          statsDiv.classList.remove("hidden");
+          // Use the same date range as the charts so coverage % is consistent.
+          const a = await fetch(`/api/analysis?${q}`).then((r) => r.json());
+          if (!a) { statsDiv.innerHTML = "<p>No analysis yet.</p>"; return; }
+          const nights = await fetch(`/api/nights?${q}`).then((r) => r.json());
+          const total = nights.length;
+          const completePct = total > 0 ? (a.n_complete_nights / total * 100).toFixed(0) : 0;
+          const periodCell = a.dominant_period_min > 0
+            ? `${formatHm(a.dominant_period_min)} <span class="text-slate-500">— Q=${a.dominant_period_q.toFixed(0)}; 24h 00m = entrained</span>`
+            : `<span class="text-slate-500">n/a (need ≥2 days of data)</span>`;
+          const periodHighlight = a.dominant_period_min > 0 && Math.abs(a.dominant_period_min - 1440) > 15 ? "bg-amber-50" : "";
+          statsDiv.innerHTML = `
+            <p class="text-xs text-slate-500 mb-2">
+              Stats are computed only over nights where the watch captured at least 3 hours of asleep+in-bed evidence,
+              so partial-data nights (watch charging) don't drag the means down.
+            </p>
+            <table class="w-full md:w-2/3 text-sm border-collapse">
+              <tr class="border-b"><td class="py-1 font-medium">Nights with sufficient data</td><td>${a.n_complete_nights} of ${total} (${completePct}%)</td></tr>
+              <tr class="border-b"><td class="py-1 font-medium">Mean total sleep</td><td>${formatHm(a.mean_duration_min)}</td></tr>
+              <tr class="border-b ${periodHighlight}"><td class="py-1 font-medium">Dominant period (periodogram)</td><td>${periodCell}</td></tr>
+              <tr class="border-b ${Math.abs(a.midpoint_drift_min_per_day) > 30 ? 'bg-amber-50' : ''}"><td class="py-1 font-medium">Midpoint drift (linear fit)</td><td>${a.midpoint_drift_min_per_day.toFixed(2)} min/day</td></tr>
+              <tr class="border-b"><td class="py-1 font-medium">Interdaily Stability (IS)</td><td>${a.is_value.toFixed(3)} <span class="text-slate-500">— 1.0 = perfectly regular</span></td></tr>
+              <tr class="border-b"><td class="py-1 font-medium">Intradaily Variability (IV)</td><td>${a.iv_value.toFixed(3)} <span class="text-slate-500">— lower = less fragmented</span></td></tr>
+              <tr class="border-b"><td class="py-1 font-medium">Sleep Regularity Index</td><td>${a.sri_value.toFixed(1)} <span class="text-slate-500">— 100 = identical day-to-day</span></td></tr>
+              <tr class="border-b"><td class="py-1 font-medium">Bedtime SD <span class="text-slate-500 font-normal">(circular, 24h clock)</span></td><td>${formatHm(a.bedtime_sd_min)}</td></tr>
+              <tr class="border-b"><td class="py-1 font-medium">Waketime SD <span class="text-slate-500 font-normal">(circular, 24h clock)</span></td><td>${formatHm(a.waketime_sd_min)}</td></tr>
+              <tr><td class="py-1 font-medium">Duration SD</td><td>${formatHm(a.duration_sd_min)}</td></tr>
+            </table>
+            <p class="text-xs text-slate-500 mt-3">
+              Bedtime / waketime SDs use circular statistics on the 24h clock so a
+              23:50 → 00:10 shift counts as 20 minutes, not 22 hours. Maxes out at 6h
+              for a schedule uniformly spread across the clock. Drift is reported
+              separately as Midpoint drift.
+            </p>`;
+        }
+      }
+
+      [dateStart, dateEnd].forEach((el) => el.addEventListener("change", () => renderTab(currentTab)));
+
+      $("btn-recompute").addEventListener("click", async () => {
+        const cutoff = parseInt(cutoffHour.value, 10);
+        const r = await fetch(`/api/recompute?cutoff=${cutoff}`, { method: "POST" });
+        if (r.ok) renderTab(currentTab);
+      });
+
+      $("btn-replace").addEventListener("click", () => {
+        if (!confirm("Replacing wipes the previous export. Continue?")) return;
+        emptyState.classList.remove("hidden");
+        loadedState.classList.add("hidden");
+        fileInput.value = "";
+        fileName.textContent = "";
+        uploadProgress.classList.add("hidden");
+        // Clear persisted dates so loadOverview() picks the new export's range.
+        // Patient name / notes / section selections survive — those are user prefs.
+        dateStart.value = "";
+        dateEnd.value = "";
+        saveStored({ dateStart: "", dateEnd: "" });
+      });
+
+      $("btn-pdf").addEventListener("click", async () => {
+        const sections = {};
+        document.querySelectorAll("[data-pdf-section]").forEach((cb) => {
+          sections[`include_${cb.dataset.pdfSection}`] = cb.checked;
+        });
+        const body = {
+          patient_name: $("pdf-patient").value,
+          clinician_notes: $("pdf-notes").value,
+          ...sections,
+        };
+        $("pdf-status").textContent = "Generating…";
+        const q = rangeQuery();
+        const r = await fetch(`/api/pdf?${q}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const detail = await r.text();
+          $("pdf-status").textContent = "Error: " + detail;
+          return;
+        }
+        const blob = await r.blob();
+        const cd = r.headers.get("Content-Disposition") || "";
+        const m = /filename="([^"]+)"/.exec(cd);
+        const filename = m ? m[1] : "sleep-report.pdf";
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+        $("pdf-status").textContent = "Downloaded: " + filename;
+      });
+
+      // ---------------- boot ----------------
+      setActiveTab("actogram");
+      loadOverview();
+    })();
+    </script>
+  </body>
+</html>
