@@ -35,6 +35,12 @@ EXPOSE 8000
 # data dir is volume-mounted; make sure it exists at first boot
 RUN mkdir -p /app/data
 
+# Run as non-root so bind-mounted host dirs get the expected ownership
+# (uid 1000) instead of root.
+RUN useradd -u 1000 -m -s /bin/bash sleepreport && \
+    chown -R sleepreport:sleepreport /app
+USER sleepreport
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -fsS http://localhost:8000/health || exit 1
 
